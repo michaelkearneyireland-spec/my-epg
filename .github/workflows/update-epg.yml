@@ -28,6 +28,15 @@ jobs:
       - name: Download the iptv-org grabber
         run: git clone --depth 1 -b master https://github.com/iptv-org/epg.git epg
 
+      - name: Download iptv-org channel time zones
+        run: curl -fsSL -o feeds.csv https://raw.githubusercontent.com/iptv-org/database/master/data/feeds.csv
+
+      - name: Build the channel list from today's English playlist
+        run: |
+          node build-channels.js epg feeds.csv channels.generated.xml \
+            https://iptv-org.github.io/iptv/languages/eng.m3u \
+            english.channels.xml
+
       - name: Install
         working-directory: epg
         run: npm install
@@ -37,7 +46,7 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/public"
           npm run grab --- \
-            --channels="$GITHUB_WORKSPACE/english.channels.xml" \
+            --channels="$GITHUB_WORKSPACE/channels.generated.xml" \
             --output="$GITHUB_WORKSPACE/public/guide.xml" \
             --gzip="$GITHUB_WORKSPACE/public/guide.xml.gz" \
             --days=3 \
@@ -45,7 +54,8 @@ jobs:
 
       - name: Add a simple index page
         run: |
-          echo '<!doctype html><title>EPG</title><p><a href="guide.xml">guide.xml</a> | <a href="guide.xml.gz">guide.xml.gz</a></p>' > public/index.html
+          cp channels.generated.xml public/channels.xml
+          echo '<!doctype html><title>EPG</title><p><a href="guide.xml">guide.xml</a> | <a href="guide.xml.gz">guide.xml.gz</a> | <a href="channels.xml">channel list used</a></p>' > public/index.html
           ls -lh public
 
       - uses: actions/upload-pages-artifact@v3
