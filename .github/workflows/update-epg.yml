@@ -31,11 +31,17 @@ jobs:
       - name: Download iptv-org channel time zones
         run: curl -fsSL -o feeds.csv https://raw.githubusercontent.com/iptv-org/database/master/data/feeds.csv
 
-      - name: Build the channel list from today's English playlist
+      - name: Download today's English playlist
+        run: curl -fsSL -o eng.m3u https://iptv-org.github.io/iptv/languages/eng.m3u
+
+      - name: Build your playlist (minus exclude.txt)
         run: |
-          node build-channels.js epg feeds.csv channels.generated.xml \
-            https://iptv-org.github.io/iptv/languages/eng.m3u \
-            english.channels.xml
+          mkdir -p public
+          node filter-playlist.js eng.m3u public/playlist.m3u \
+            "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/guide.xml.gz"
+
+      - name: Build the channel list from your playlist
+        run: node build-channels.js epg feeds.csv channels.generated.xml public/playlist.m3u english.channels.xml
 
       - name: Install
         working-directory: epg
@@ -55,7 +61,7 @@ jobs:
       - name: Add a simple index page
         run: |
           cp channels.generated.xml public/channels.xml
-          echo '<!doctype html><title>EPG</title><p><a href="guide.xml">guide.xml</a> | <a href="guide.xml.gz">guide.xml.gz</a> | <a href="channels.xml">channel list used</a></p>' > public/index.html
+          echo '<!doctype html><title>EPG</title><p><a href="guide.xml">guide.xml</a> | <a href="guide.xml.gz">guide.xml.gz</a> | <a href="playlist.m3u">playlist.m3u</a> | <a href="channels.xml">channel list used</a></p>' > public/index.html
           ls -lh public
 
       - uses: actions/upload-pages-artifact@v3
