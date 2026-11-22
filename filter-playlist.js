@@ -1,57 +1,83 @@
-// Makes your own copy of the iptv-org playlist without the channels listed in
-// exclude.txt, and points it at your guide so players can load the EPG
-// automatically.
-//
-// Usage: node filter-playlist.js <input.m3u> <output.m3u> [guide-url]
-// exclude.txt (optional, next to this script): one tvg-id per line.
-// Lines starting with # in exclude.txt are treated as comments.
+name: Update EPG
 
-const fs = require('fs');
-const path = require('path');
+on:
+  schedule:
+    - cron: '0 3 * * *'   # every day at 03:00 UTC
+  workflow_dispatch:       # adds a "Run workflow" button
 
-const [input, output, guideUrl] = process.argv.slice(2);
-if (!input || !output) {
-  console.error('Usage: node filter-playlist.js <input.m3u> <output.m3u> [guide-url]');
-  process.exit(1);
-}
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 
-const exclude = new Set();
-const excludeFile = path.join(__dirname, 'exclude.txt');
-if (fs.existsSync(excludeFile)) {
-  for (const line of fs.readFileSync(excludeFile, 'utf8').split(/\r?\n/)) {
-    const id = line.trim();
-    if (id && !id.startsWith('#')) exclude.add(id);
-  }
-}
+concurrency:
+  group: epg
+  cancel-in-progress: false
 
-const lines = fs.readFileSync(input, 'utf8').split(/\r?\n/);
-const out = [];
-let header = '#EXTM3U';
-if (lines[0] && lines[0].startsWith('#EXTM3U')) header = lines.shift();
-if (guideUrl) {
-  // Replace any existing guide address in the header with yours
-  header = header.replace(/\s+(x-tvg-url|url-tvg)="[^"]*"/g, '') + ` x-tvg-url="${guideUrl}"`;
-}
-out.push(header);
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v6
 
-let block = [];   // lines belonging to the current channel entry
-let skip = false;
-let kept = 0, removed = 0;
-for (const line of lines) {
-  if (line.startsWith('#EXTINF')) {
-    const id = (line.match(/tvg-id="([^"]*)"/) || [])[1] || '';
-    skip = exclude.has(id);
-    block = [line];
-  } else if (block.length) {
-    block.push(line);
-    if (line.trim() && !line.startsWith('#')) {   // the stream address ends the entry
-      if (skip) removed++; else { out.push(...block); kept++; }
-      block = [];
-    }
-  } else if (line.trim()) {
-    out.push(line);
-  }
-}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
 
-fs.writeFileSync(output, out.join('\n') + '\n');
-console.log(`Playlist entries kept: ${kept}, removed by exclude.txt: ${removed}`);
+      - name: Download the iptv-org grabber
+        run: git clone --depth 1 -b master https://github.com/iptv-org/epg.git epg
+
+      - name: Download iptv-org channel time zones
+        run: curl -fsSL -o feeds.csv https://raw.githubusercontent.com/iptv-org/database/master/data/feeds.csv
+
+      - name: Download today's English playlist
+        run: curl -fsSL -o eng.m3u https://iptv-org.github.io/iptv/languages/eng.m3u
+
+      - name: Build your playlist (minus exclude.txt)
+        run: |
+          mkdir -p public
+          node filter-playlist.js eng.m3u filtered.m3u \
+            "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/guide.xml.gz"
+
+      - name: Remove dead streams
+        run: node check-streams.js filtered.m3u public/playlist.m3u public/dead-channels.txt
+
+      - name: Build the channel list from your playlist
+        run: node build-channels.js epg feeds.csv channels.generated.xml public/playlist.m3u english.channels.xml
+
+      - name: Install
+        working-directory: epg
+        run: npm install
+
+      - name: Grab listings
+        working-directory: epg
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/public"
+          npm run grab --- \
+            --channels="$GITHUB_WORKSPACE/channels.generated.xml" \
+            --output="$GITHUB_WORKSPACE/public/guide.xml" \
+            --gzip="$GITHUB_WORKSPACE/public/guide.xml.gz" \
+            --days=3 \
+            --maxConnections=10
+
+      - name: Add a simple index page
+        run: |
+          cp channels.generated.xml public/channels.xml
+          echo '<!doctype html><title>EPG</title><p><a href="guide.xml">guide.xml</a> | <a href="guide.xml.gz">guide.xml.gz</a> | <a href="playlist.m3u">playlist.m3u</a> | <a href="dead-channels.txt">removed as dead</a> | <a href="channels.xml">channel list used</a></p>' > public/index.html
+          ls -lh public
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
+
