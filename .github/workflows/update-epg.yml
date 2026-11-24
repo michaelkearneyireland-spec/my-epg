@@ -1,4 +1,4 @@
-ame: Update EPG
+Name: Update EPG
 
 on:
   schedule:
@@ -13,10 +13,6 @@ permissions:
 concurrency:
   group: epg
   cancel-in-progress: false
-
-env:
-  GROUP_BY: country                         # sort and group by country (delete this line to keep iptv-org's order)
-  FIRST_COUNTRIES: Ireland,United Kingdom   # shown first, then the rest A-Z
 
 jobs:
   build:
@@ -84,4 +80,6 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v5
+
+
 
