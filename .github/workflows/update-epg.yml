@@ -1,4 +1,4 @@
-Name: Update EPG
+name: Update EPG
 
 on:
   schedule:
@@ -80,6 +80,4 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v5
-
-
 
